@@ -1,0 +1,547 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>4種類4種類グラフ比較実験 jsPsych版</title>
+
+  <!-- jsPsych CDN -->
+  <script src="https://unpkg.com/jspsych@7.3.4"></script>
+  <script src="https://unpkg.com/@jspsych/plugin-html-button-response@1.2.0"></script>
+  <script src="https://unpkg.com/@jspsych/plugin-html-keyboard-response@1.1.3"></script>
+  <script src="https://unpkg.com/@jspsych/plugin-survey-html-form@1.0.3"></script>
+  <script src="https://unpkg.com/@jspsych/plugin-call-function@1.1.3"></script>
+  <link href="https://unpkg.com/jspsych@7.3.4/css/jspsych.css" rel="stylesheet" type="text/css" />
+
+  <style>
+    body {
+      background: #333;
+      color: white;
+      font-family: "Yu Gothic", "Hiragino Kaku Gothic ProN", Arial, sans-serif;
+    }
+
+    .jspsych-content-wrapper {
+      background: #333;
+    }
+
+    .jspsych-content {
+      max-width: 960px;
+    }
+
+    .instruction-box {
+      line-height: 1.8;
+      font-size: 20px;
+      text-align: left;
+      max-width: 760px;
+      margin: 0 auto;
+    }
+
+    .center-text {
+      text-align: center;
+    }
+
+    .graph-title {
+      font-size: 26px;
+      font-weight: bold;
+      margin-bottom: 18px;
+    }
+
+    .graph-area {
+      width: 760px;
+      height: 430px;
+      margin: 0 auto 20px auto;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .response-reminder {
+      font-size: 18px;
+      margin-top: 10px;
+      color: #eee;
+    }
+
+    .jspsych-btn {
+      font-size: 22px;
+      padding: 10px 24px;
+      margin: 8px;
+      border-radius: 6px;
+    }
+
+    .small-note {
+      font-size: 16px;
+      color: #ddd;
+    }
+
+    input, select {
+      font-size: 18px;
+      padding: 6px;
+      margin: 6px;
+    }
+
+    label {
+      display: block;
+      margin: 12px 0;
+    }
+  </style>
+</head>
+<body></body>
+
+<script>
+  const jsPsych = initJsPsych({
+    on_finish: function() {
+      const completionCode = Math.random().toString(36).substring(2, 10).toUpperCase();
+      const participantID = getParticipantID();
+      const compactCSV = buildCompactCSV(completionCode, participantID);
+
+      document.querySelector('#jspsych-content').innerHTML = `
+        <div class="instruction-box center-text" style="background:#fff;color:#333;padding:30px;border-radius:8px;">
+          <h1>実験終了</h1>
+          <p>ご協力ありがとうございました。</p>
+          <div id="saving-status" style="margin:20px 0;padding:15px;background-color:#fff3cd;border-radius:8px;">
+            <p style="margin:0;">データをGoogleフォームへ自動送信中です...</p>
+          </div>
+          <p><strong>完了コード：</strong> ${completionCode}</p>
+          <p class="small-note" style="color:#666;">送信に失敗した場合は「再送信する」を押してください。</p>
+          <button id="retry-send-button" class="jspsych-btn" style="display:none;">再送信する</button>
+          <button id="download-csv-button" class="jspsych-btn">CSVをダウンロード</button>
+        </div>
+      `;
+
+      const downloadButton = document.getElementById("download-csv-button");
+      if (downloadButton) {
+        downloadButton.addEventListener("click", function() {
+          jsPsych.data.get().localSave("csv", "graph4_experiment_results.csv");
+        });
+      }
+
+      const retryButton = document.getElementById("retry-send-button");
+      if (retryButton) {
+        retryButton.addEventListener("click", function() {
+          retryButton.disabled = true;
+          retryButton.textContent = "再送信中...";
+          sendDataToGoogleForm(completionCode, participantID, compactCSV);
+        });
+      }
+
+      sendDataToGoogleForm(completionCode, participantID, compactCSV);
+    }
+  });
+
+  const labels = ["1", "2", "3", "4", "5"];
+
+  // 5セグメントの割合セット。すべて合計100。
+  const valueSets = [
+    [32, 24, 19, 15, 10], 
+    [30, 26, 18, 14, 12],
+    [35, 22, 17, 16, 10],
+    [28, 25, 21, 14, 12],
+    [31, 23, 20, 17, 9],
+    [29, 27, 18, 16, 10],
+    [34, 23, 20, 13, 10],
+    [33, 25, 17, 14, 11],
+    [35, 22, 19, 15, 9],
+    [27, 26, 22, 15, 10]
+  ];
+
+  const graphTypes = ["pie", "band", "donut49", "donut735"];
+  const graphTypeJa = {
+    pie: "円グラフ",
+    band: "帯グラフ",
+    donut49: "ドーナツグラフ49%",
+    donut735: "ドーナツグラフ73.5%"
+  };
+
+  function shuffle(array) {
+    const newArray = [...array];
+    for (let i = newArray.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [newArray[i], newArray[j]] = [newArray[j], newArray[i]];
+    }
+    return newArray;
+  }
+
+  function makeItems(values) {
+    // 表示順に固定して番号を振る。
+    // 円グラフ・ドーナツグラフでは真上から右回りに1,2,3,4,5、
+    // 帯グラフでは左から順に1,2,3,4,5となる。
+    return labels.map((label, i) => ({ label, value: values[i] }));
+  }
+
+  function getCorrectAnswer(items) {
+    const sorted = [...items].sort((a, b) => b.value - a.value);
+    return sorted[2].label;
+  }
+
+  function getSegmentFill() {
+    return "white";
+  }
+
+  function polarToCartesian(cx, cy, r, angle) {
+    return {
+      x: cx + r * Math.cos(angle),
+      y: cy + r * Math.sin(angle)
+    };
+  }
+
+  function arcPath(cx, cy, r, startAngle, endAngle) {
+    const start = polarToCartesian(cx, cy, r, startAngle);
+    const end = polarToCartesian(cx, cy, r, endAngle);
+    const largeArcFlag = endAngle - startAngle > Math.PI ? 1 : 0;
+    return `M ${cx} ${cy} L ${start.x} ${start.y} A ${r} ${r} 0 ${largeArcFlag} 1 ${end.x} ${end.y} Z`;
+  }
+
+  function donutPath(cx, cy, outerR, innerR, startAngle, endAngle) {
+    const outerStart = polarToCartesian(cx, cy, outerR, startAngle);
+    const outerEnd = polarToCartesian(cx, cy, outerR, endAngle);
+    const innerStart = polarToCartesian(cx, cy, innerR, endAngle);
+    const innerEnd = polarToCartesian(cx, cy, innerR, startAngle);
+    const largeArcFlag = endAngle - startAngle > Math.PI ? 1 : 0;
+
+    return [
+      `M ${outerStart.x} ${outerStart.y}`,
+      `A ${outerR} ${outerR} 0 ${largeArcFlag} 1 ${outerEnd.x} ${outerEnd.y}`,
+      `L ${innerStart.x} ${innerStart.y}`,
+      `A ${innerR} ${innerR} 0 ${largeArcFlag} 0 ${innerEnd.x} ${innerEnd.y}`,
+      "Z"
+    ].join(" ");
+  }
+
+  function drawPieSvg(items, isDonut = false, donutHoleRatio = 0) {
+    const width = 760;
+    const height = 430;
+    const cx = width / 2;
+    const cy = 210;
+    const outerR = 155;
+
+    // ドーナツグラフの場合、穴の内半径を外半径に対する割合で決める。
+    // 例：donutHoleRatio = 0.49 なら innerR = outerR * 0.49
+    const innerR = isDonut ? outerR * donutHoleRatio : 0;
+
+    const total = items.reduce((sum, item) => sum + item.value, 0);
+    let startAngle = -Math.PI / 2;
+
+    let svg = `<svg width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" aria-label="graph">`;
+
+    items.forEach((item, index) => {
+      const sliceAngle = (item.value / total) * Math.PI * 2;
+      const endAngle = startAngle + sliceAngle;
+      const path = isDonut
+        ? donutPath(cx, cy, outerR, innerR, startAngle, endAngle)
+        : arcPath(cx, cy, outerR, startAngle, endAngle);
+
+      const midAngle = startAngle + sliceAngle / 2;
+
+      // 番号位置：
+      // 円グラフは外半径の約63%位置。
+      // ドーナツグラフはリング幅の中央。
+      const labelR = isDonut ? (outerR + innerR) / 2 : outerR * 0.63;
+      const labelPos = polarToCartesian(cx, cy, labelR, midAngle);
+
+      svg += `<path d="${path}" fill="${getSegmentFill()}" stroke="black" stroke-width="2"></path>`;
+      svg += `<text x="${labelPos.x}" y="${labelPos.y}" text-anchor="middle" dominant-baseline="central" font-size="26" font-weight="bold" fill="black">${item.label}</text>`;
+
+      startAngle = endAngle;
+    });
+
+    if (isDonut) {
+      svg += `<circle cx="${cx}" cy="${cy}" r="${innerR}" fill="#333" stroke="black" stroke-width="2"></circle>`;
+    }
+
+    svg += `</svg>`;
+    return svg;
+  }
+
+  function drawBandSvg(items) {
+    const width = 760;
+    const height = 430;
+    const x = 90;
+    const y = 165;
+    const totalWidth = 580;
+    const bandHeight = 105;
+    const total = items.reduce((sum, item) => sum + item.value, 0);
+    let currentX = x;
+
+    let svg = `<svg width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" aria-label="graph">`;
+
+    items.forEach((item, index) => {
+      const segmentWidth = totalWidth * item.value / total;
+      svg += `<rect x="${currentX}" y="${y}" width="${segmentWidth}" height="${bandHeight}" fill="${getSegmentFill()}" stroke="black" stroke-width="2"></rect>`;
+      svg += `<text x="${currentX + segmentWidth / 2}" y="${y + bandHeight / 2}" text-anchor="middle" dominant-baseline="central" font-size="26" font-weight="bold" fill="black">${item.label}</text>`;
+      currentX += segmentWidth;
+    });
+
+    svg += `</svg>`;
+    return svg;
+  }
+
+  function drawGraph(displayType, items) {
+    if (displayType === "pie") return drawPieSvg(items, false);
+    if (displayType === "donut49") return drawPieSvg(items, true, 0.49);
+    if (displayType === "donut735") return drawPieSvg(items, true, 0.735);
+    if (displayType === "band") return drawBandSvg(items);
+    return "";
+  }
+
+  function createTrial(displayType, values, trialId, isPractice = false, datasetId = "") {
+    // valuesはすでに表示順に並べたものを受け取る。
+    // そのため、同じdatasetIdなら円・ドーナツ・帯で1〜5に対応する値が揃う。
+    const items = makeItems(values);
+    const correctAnswer = getCorrectAnswer(items);
+
+    return {
+      type: jsPsychHtmlButtonResponse,
+      stimulus: function() {
+        const graphSvg = drawGraph(displayType, items);
+        return `
+          <div class="graph-title">3番目に大きい部分を選択してください</div>
+          <div class="graph-area">${graphSvg}</div>
+          <div class="response-reminder">1〜5の中から、3番目に大きいと思うものを選んでください。</div>
+        `;
+      },
+      choices: labels,
+      data: {
+        phase: isPractice ? "practice" : "main",
+        task_type: "third_largest",
+        trial_id: trialId,
+        dataset_id: datasetId,
+        display_type: displayType,
+        values_original_order: values.join("|"),
+        correct_answer: correctAnswer
+      },
+      on_finish: function(data) {
+        data.response_label = labels[data.response];
+        data.correct = data.response_label === data.correct_answer ? 1 : 0;
+      }
+    };
+  }
+
+
+  // ==============================
+  // Googleフォーム送信用設定
+  // ==============================
+  // 以前の実験サイトと同じ形式：
+  // 参加者ID・完了コード・実験CSVデータの3項目をGoogleフォームへ送信する。
+  // 別のGoogleフォームを使う場合は、下のURLとentry番号を差し替える。
+  const FORM_URL = "https://docs.google.com/forms/d/e/1FAIpQLSf8YTLvFwtHDtRNyllXAUVCWG2A9s-svXL6LZ1qWapsEowGCA/formResponse";
+  const ENTRY_PARTICIPANT_ID  = "entry.1761872042";
+  const ENTRY_COMPLETION_CODE = "entry.247764969";
+  const ENTRY_CSV_DATA        = "entry.1413570755";
+
+  function getParticipantID() {
+    const surveyData = jsPsych.data.get().filter({ trial_type: "survey-html-form" }).values();
+    if (surveyData.length > 0 && surveyData[0].response && surveyData[0].response.participant_id) {
+      return surveyData[0].response.participant_id;
+    }
+    return "P" + Date.now();
+  }
+
+  function csvEscape(value) {
+    if (value === undefined || value === null) return "";
+    return `"${String(value).replace(/"/g, '""')}"`;
+  }
+
+  function buildCompactCSV(completionCode, participantID) {
+    const trials = jsPsych.data.get().filter({ phase: "main" }).values();
+
+    const header = [
+      "participant_id",
+      "completion_code",
+      "trial_id",
+      "dataset_id",
+      "display_type",
+      "values_original_order",
+      "correct_answer",
+      "response_label",
+      "correct",
+      "rt"
+    ];
+
+    let csv = header.join(",") + "\n";
+
+    trials.forEach(trial => {
+      const row = [
+        participantID,
+        completionCode,
+        trial.trial_id,
+        trial.dataset_id,
+        trial.display_type,
+        trial.values_original_order,
+        trial.correct_answer,
+        trial.response_label,
+        trial.correct,
+        trial.rt
+      ];
+      csv += row.map(csvEscape).join(",") + "\n";
+    });
+
+    return csv;
+  }
+
+  function sendDataToGoogleForm(completionCode, participantID, compactCSV) {
+    const status = document.getElementById("saving-status");
+    const retryButton = document.getElementById("retry-send-button");
+
+    if (status) {
+      status.style.backgroundColor = "#fff3cd";
+      status.innerHTML = '<p style="margin:0;color:#856404;">データをGoogleフォームへ送信中です...</p>';
+    }
+    if (retryButton) {
+      retryButton.style.display = "none";
+      retryButton.disabled = true;
+      retryButton.textContent = "再送信する";
+    }
+
+    const formData = new FormData();
+    formData.append(ENTRY_PARTICIPANT_ID, participantID);
+    formData.append(ENTRY_COMPLETION_CODE, completionCode);
+    formData.append(ENTRY_CSV_DATA, compactCSV);
+
+    fetch(FORM_URL, {
+      method: "POST",
+      body: formData,
+      mode: "no-cors"
+    })
+    .then(() => {
+      if (status) {
+        status.style.backgroundColor = "#d4edda";
+        status.innerHTML = '<p style="margin:0;color:#155724;">Googleフォームへの送信リクエストが完了しました。</p><p style="margin:8px 0 0 0;color:#155724;font-size:14px;">この画面を閉じて構いません。</p>';
+      }
+      if (retryButton) {
+        retryButton.style.display = "inline-block";
+        retryButton.disabled = false;
+      }
+    })
+    .catch(() => {
+      if (status) {
+        status.style.backgroundColor = "#f8d7da";
+        status.innerHTML = '<p style="margin:0;color:#721c24;">送信に失敗しました。通信状況を確認し、「再送信する」を押してください。</p><p style="margin:8px 0 0 0;color:#721c24;font-size:14px;">うまくいかない場合はCSVをダウンロードして提出してください。</p>';
+      }
+      if (retryButton) {
+        retryButton.style.display = "inline-block";
+        retryButton.disabled = false;
+      }
+    });
+  }
+
+  const timeline = [];
+
+  timeline.push({
+    type: jsPsychSurveyHtmlForm,
+    preamble: `
+      <div class="instruction-box">
+        <h1 class="center-text">4種類グラフ比較実験</h1>
+        <p>この実験では、表示されたグラフを見て、<strong>3番目に大きい部分</strong>を選択してもらいます。</p>
+        <p>番号は固定で、<strong>円グラフ・ドーナツグラフでは真上から右回りに1〜5</strong>、<strong>帯グラフでは左から順に1〜5</strong> です。</p><p>使用するグラフは、円グラフ、帯グラフ、内半径49%のドーナツグラフ、内半径73.5%のドーナツグラフの4種類です。</p>
+        <p>グラフには 1, 2, 3, 4, 5 の5つの部分があります。大きい順に見たとき、3番目に大きいと思う番号を選択してください。</p>
+        <p>回答の正確さと、回答までの時間を記録します。</p>
+      </div>
+    `,
+    html: `
+      <div class="instruction-box">
+        <label>参加者ID：<input name="participant_id" type="text" required></label>
+        <label>年代：
+          <select name="age" required>
+            <option value="">選択してください</option>
+            <option value="10代">10代</option>
+            <option value="20代">20代</option>
+            <option value="30代">30代</option>
+            <option value="40代">40代</option>
+            <option value="50代">50代</option>
+            <option value="60代以上">60代以上</option>
+          </select>
+        </label>
+        <label>普段よく見るグラフ：
+          <select name="familiar_graph" required>
+            <option value="">選択してください</option>
+            <option value="円グラフ">円グラフ</option>
+            <option value="帯グラフ">帯グラフ</option>
+            <option value="ドーナツグラフ">ドーナツグラフ</option>
+            <option value="特にない">特にない</option>
+          </select>
+        </label>
+      </div>
+    `,
+    button_label: "練習へ進む"
+  });
+
+  timeline.push({
+    type: jsPsychHtmlButtonResponse,
+    stimulus: `
+      <div class="instruction-box center-text">
+        <h2>練習</h2>
+        <p>まず練習問題を4問行います。</p>
+        <p>準備ができたら始めてください。</p>
+      </div>
+    `,
+    choices: ["開始"]
+  });
+
+  timeline.push(createTrial("pie", shuffle([32, 24, 19, 15, 10]), "practice_1", true, "practice_1"));
+  timeline.push(createTrial("band", shuffle([30, 26, 18, 14, 12]), "practice_2", true, "practice_2"));
+  timeline.push(createTrial("donut49", shuffle([35, 22, 17, 14, 12]), "practice_3", true, "practice_3"));
+  timeline.push(createTrial("donut735", shuffle([28, 25, 21, 14, 12]), "practice_4", true, "practice_4"));
+
+  timeline.push({
+    type: jsPsychHtmlButtonResponse,
+    stimulus: `
+      <div class="instruction-box center-text">
+        <h2>本実験</h2>
+        <p>ここから本実験です。</p>
+        <p>できるだけ正確に、かつ素早く回答してください。</p>
+      </div>
+    `,
+    choices: ["本実験を開始する"]
+  });
+
+  let mainTrials = [];
+  let trialCount = 1;
+
+  valueSets.forEach((values, setIndex) => {
+    // 同じデータセットでは、ここで1回だけ数値の並びをランダム化する。
+    // その並びを円グラフ・帯グラフ・ドーナツグラフで共通に使う。
+    const arrangedValues = shuffle(values);
+    const datasetId = `set_${setIndex + 1}`;
+
+    graphTypes.forEach(displayType => {
+      mainTrials.push(createTrial(displayType, arrangedValues, `main_${trialCount}`, false, datasetId));
+      trialCount++;
+    });
+  });
+
+  // 試行の提示順自体はランダム化する。
+  mainTrials = shuffle(mainTrials);
+  timeline.push(...mainTrials);
+
+  timeline.push({
+    type: jsPsychSurveyHtmlForm,
+    preamble: `
+      <div class="instruction-box">
+        <h2 class="center-text">実験後アンケート</h2>
+      </div>
+    `,
+    html: `
+      <div class="instruction-box">
+        <label>3番目に大きい部分を選びやすかったグラフ：
+          <select name="easy_graph" required>
+            <option value="">選択してください</option>
+            <option value="円グラフ">円グラフ</option>
+            <option value="帯グラフ">帯グラフ</option>
+            <option value="ドーナツグラフ49%">ドーナツグラフ49%</option>
+            <option value="ドーナツグラフ73.5%">ドーナツグラフ73.5%</option>
+            <option value="どれも同じくらい">どれも同じくらい</option>
+          </select>
+        </label>
+        <label>感想・気づいたこと：<br>
+          <textarea name="comment" rows="4" cols="60"></textarea>
+        </label>
+      </div>
+    `,
+    button_label: "終了する"
+  });
+
+  // 実験後アンケートが終わった時点で、jsPsychのon_finishが自動実行され、
+  // Googleフォームへ自動送信される。
+  jsPsych.run(timeline);
+</script>
+</html>
